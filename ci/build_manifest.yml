@@ -1,0 +1,25 @@
+
+test_apps/liboqs_test:
+  enable:
+    - if: IDF_TARGET in ["esp32c3", "esp32c6", "esp32p4"]
+      reason: pure-crypto Unity suite; RISC-V targets esp-emu can run/build
+
+examples/kem_basic:
+  enable:
+    - if: IDF_TARGET in ["esp32c3", "esp32c6", "esp32p4"]
+      reason: ML-KEM-768 benchmark, no peripherals — emulator-runnable
+
+examples/signature_basic:
+  enable:
+    - if: IDF_TARGET in ["esp32c3", "esp32c6", "esp32p4"]
+      reason: ML-DSA-65 benchmark, no peripherals — emulator-runnable
+
+examples/pqc_boot_verify:
+  enable:
+    - if: IDF_TARGET in ["esp32c3", "esp32c6"]
+      reason: Hybrid PQC Secure Boot V2 (c3/c5/c6; c3 and c6 are in the emulator set). Building it exercises scripts/pqc_sign.py.
+
+examples/esp_hybrid_tls:
+  enable:
+    - if: IDF_TARGET == "esp32c5"
+      reason: X25519MLKEM768 + ML-DSA-65 TLS 1.3. The example builds for any Wi-Fi target; CI compiles esp32c5 as the representative one. esp-emu 0.37.0 has no C5 target, so this is compile-only.

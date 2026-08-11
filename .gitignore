@@ -1,0 +1,23 @@
+# Build output
+build/
+
+# ESP-IDF generated config
+sdkconfig
+sdkconfig.old
+managed_components/
+dependencies.lock
+
+# Logs, generated binaries, and locally-generated keys (never commit secrets).
+# All keys (Secure Boot signing + ML-DSA) are generated at build time, not
+# committed — CI regenerates them (see build_pqc_boot_verify in .gitlab-ci.yml).
+log/
+keys/
+*.bin
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# macOS
+.DS_Store

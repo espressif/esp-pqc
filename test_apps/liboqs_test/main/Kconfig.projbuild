@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2025-2026 Espressif Systems (Shanghai) CO LTD
+# SPDX-License-Identifier: Apache-2.0
+menu "esp-liboqs test app"
+
+    config LIBOQS_TEST_TASK_STACK_SIZE
+        int "Unity test task stack size (bytes)"
+        default 24576
+        help
+            Stack for the FreeRTOS task that runs the Unity menu and test cases.
+            With heap-backed ML-DSA/ML-KEM temporaries a few KB suffices; the
+            stack_only build variant raises this to ~110 KB because ML-DSA-65
+            then keeps ~56 KB of scratch on the stack.
+
+    config LIBOQS_TEST_RUN_ALL_ON_BOOT
+        bool "Run all Unity test cases automatically on boot"
+        default n
+        help
+            When y, app_main runs every registered Unity test case once, then
+            prints a completion marker — no interactive serial menu. This is the
+            mode CI uses under esp-emu (ci/emu_run.py is read-only and cannot
+            drive the menu). When n (default), the app presents the usual
+            interactive unity_run_menu() for `idf.py monitor` and for
+            pytest-embedded's run_all_single_board_cases().
+
+endmenu

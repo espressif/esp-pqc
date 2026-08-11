@@ -1,0 +1,23 @@
+# esp-liboqs test app — default configuration
+CONFIG_LIBOQS_ENABLED=y
+CONFIG_LIBOQS_ENABLE_KEM_ML_KEM=y
+CONFIG_LIBOQS_ENABLE_SIG_ML_DSA=y
+CONFIG_LIBOQS_AUTO_INIT_RNG=y
+CONFIG_LIBOQS_USE_ESP_RANDOM=y
+
+# Heap-backed temporaries (the behavior this app most needs to regression-test)
+CONFIG_LIBOQS_MLD_HEAP_TEMPORARIES=y
+CONFIG_LIBOQS_MLK_HEAP_TEMPORARIES=y
+
+# ML-DSA / ML-KEM binaries are large — give the app room
+CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
+CONFIG_PARTITION_TABLE_OFFSET=0x14000
+
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=60
+
+# Unity test task stack: with heap-backed temporaries ML-DSA-65/ML-KEM-768
+# keep only a few KB on the stack, but leave generous headroom for the
+# Unity menu + mbedtls. (The stack_only CI variant raises this to ~110 KB.)
+CONFIG_LIBOQS_TEST_TASK_STACK_SIZE=24576

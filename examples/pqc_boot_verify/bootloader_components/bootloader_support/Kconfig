@@ -1,0 +1,93 @@
+# SPDX-FileCopyrightText: 2025-2026 Espressif Systems (Shanghai) CO LTD
+# SPDX-License-Identifier: Apache-2.0
+menu "PQC Secure Boot"
+
+    config PQC_SECURE_BOOT_ENABLED
+        bool "Enable PQC (ML-DSA-65) signature verification in bootloader"
+        default y
+        depends on SECURE_BOOT_V2_ENABLED && !SECURE_SIGNED_APPS_ECDSA_SCHEME
+        help
+            When enabled, the bootloader verifies the ML-DSA-65 PQC signature
+            block (located immediately after the 4 KB RSA/ECDSA V2 signature block
+            in flash) BEFORE performing RSA or ECDSA V2 Secure Boot V2 verification.
+            Both checks must pass for the image to be loaded.
+
+            Supported scheme: RSA-PSS 3072-bit (ESP32-C3/C5/C6).
+            Not compatible with legacy ECDSA V1 scheme (SECURE_SIGNED_APPS_ECDSA_SCHEME).
+
+            When disabled, only the standard RSA/ECDSA V2 Secure Boot V2 verification
+            is performed — identical to unmodified ESP-IDF behaviour.
+
+    choice PQC_MEMORY_STRATEGY
+        prompt "PQC memory management strategy"
+        depends on PQC_SECURE_BOOT_ENABLED
+        default PQC_MEM_TLSF
+        help
+            Choose how ML-DSA-65 internal buffers are allocated during
+            signature verification in the bootloader.
+
+        config PQC_MEM_STACK
+            bool "Stack (buffers on dedicated 80KB PQC stack)"
+            help
+                All ML-DSA-65 intermediate buffers are stack-allocated on
+                the dedicated 80KB PQC stack reserved permanently in
+                bootloader dram_seg. Simple, zero fragmentation, but costs
+                ~80KB of app SRAM permanently.
+
+        config PQC_MEM_TLSF
+            bool "TLSF Heap (temporary app SRAM region)"
+            help
+                ML-DSA-65 buffers are dynamically allocated from a TLSF pool
+                placed at a fixed address in the bottom of the app's SRAM
+                (0x40800000). The bootloader borrows this region during
+                verification, zeroes it afterwards, and the app reclaims it
+                as heap — saving ~80KB of SRAM for the application.
+                PQC call-frame stack is reduced to 8KB (call frames only).
+
+    endchoice
+
+    config PQC_TLSF_POOL_SIZE_KB
+        int "TLSF pool size in KB"
+        depends on PQC_MEM_TLSF
+        default 48
+        range 32 128
+        help
+            Size of the TLSF pool placed at PQC_TEMP_REGION_ADDR in app SRAM.
+            ML-DSA-65 verify needs ~35KB peak. 48KB provides ~13KB headroom.
+
+    config PQC_CALL_STACK_SIZE_KB
+        int "PQC call-frame stack size in KB"
+        depends on PQC_MEM_TLSF
+        default 8
+        range 4 16
+        help
+            Size of the PQC call-frame stack placed immediately after the
+            TLSF pool in the temporary region. 8KB provides >4x headroom
+            over the measured ~1.6KB maximum call depth.
+
+    config PQC_MLD_REDUCE_RAM
+        bool "Enable ML-DSA REDUCE_RAM optimizations"
+        depends on PQC_SECURE_BOOT_ENABLED
+        default y
+        help
+            When enabled, ML-DSA-65 uses row-buffer matrix multiplication
+            and serial FIPS-202 hashing, reducing peak RAM from ~30KB to ~5KB
+            at the cost of slower verification.
+
+            Disable this to use the full-speed implementation and measure
+            the actual RAM difference.
+
+    config PQC_DEBUG_VERBOSE
+        bool "Enable verbose PQC debug prints"
+        depends on PQC_SECURE_BOOT_ENABLED
+        default n
+        help
+            When enabled, prints detailed debug information during PQC
+            verification: TLSF heap pointers and allocation sizes, PQC
+            stack region addresses, PQC block header fields, and
+            step-by-step verification progress.
+
+            Useful for performance profiling and debugging memory issues.
+            Disable for production builds to reduce boot time and log noise.
+
+endmenu

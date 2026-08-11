@@ -1,0 +1,45 @@
+# Config for the espressif/check-copyright pre-commit hook (see .pre-commit-config.yaml).
+# Sections match top-to-bottom, LAST match wins, so order broad -> specific; DEFAULT is the fallback (no 'include'). Year pinned to 2025-2026; {license} is substituted per section (Apache-2.0 for our code and for ESP-IDF-derived bootloader code).
+
+DEFAULT:
+  perform_check: yes
+  # Existing headers may be either license; both pass the check.
+  allowed_licenses:
+    - MIT
+    - Apache-2.0
+  # New (currently header-less) first-party files get Apache-2.0, matching the root LICENSE.
+  license_for_new_files: Apache-2.0
+  new_notice_c: |
+    /*
+     * SPDX-FileCopyrightText: 2025-2026 Espressif Systems (Shanghai) CO LTD
+     *
+     * SPDX-License-Identifier: {license}
+     */
+  new_notice_python: |
+    # SPDX-FileCopyrightText: 2025-2026 Espressif Systems (Shanghai) CO LTD
+    # SPDX-License-Identifier: {license}
+  espressif_copyright: '2025-2026 Espressif Systems (Shanghai) CO LTD'
+
+# liboqs port files carrying upstream provenance: the standalone Keccak comes from the pq-crystals Kyber reference (offered as CC0-1.0 or Apache-2.0) with Espressif changes under MIT, and the mlkem-native FIPS-202 glue headers are Apache-2.0 OR ISC OR MIT. The upstream identifiers are kept rather than relicensed, with Espressif listed via SPDX-FileContributor as in ESP-IDF. Files we author from scratch in this directory are not listed here and get Apache-2.0 via DEFAULT (esp_mld_fips202_glue.h, esp_liboqs_init.c, esp_rand_adapter.c).
+liboqs_ports_upstream_derived:
+  include:
+    - 'components/liboqs/ports/fips202_kyber.c'
+    - 'components/liboqs/ports/fips202_kyber.h'
+    - 'components/liboqs/ports/esp_mlk_fips202_glue.h'
+    - 'components/liboqs/ports/esp_mlk_fips202x4_glue.h'
+  allowed_licenses:
+    - MIT
+    - Apache-2.0
+    - (CC0-1.0 OR Apache-2.0) AND MIT
+    - Apache-2.0 OR ISC OR MIT
+  license_for_new_files: Apache-2.0
+
+# Bootloader code derived from ESP-IDF's bootloader_support keeps its upstream Apache-2.0 license (e.g. modified esp_image_format.c). Everything else in the repo also gets Apache-2.0 via DEFAULT, so this section now only documents the provenance.
+esp_idf_derived_bootloader:
+  include:
+    - 'examples/pqc_boot_verify/bootloader_components/bootloader_support/'
+    - 'examples/pqc_boot_verify/bootloader_components/main/'
+  allowed_licenses:
+    - Apache-2.0
+    - MIT
+  license_for_new_files: Apache-2.0

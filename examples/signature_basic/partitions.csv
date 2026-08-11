@@ -1,0 +1,7 @@
+# Name,   Type, SubType, Offset,  Size, Flags
+nvs,      data, nvs,     ,        0x4000,
+otadata,  data, ota,     ,        0x2000,
+phy_init, data, phy,     ,        0x1000,
+# 0x1E0000 is 1.875 MB, leaving room for bootloader/table
+factory,  app,  factory, ,      3500K,
+gprof,    data, 0x3a,    ,        0x1000,

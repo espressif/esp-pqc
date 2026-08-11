@@ -1,0 +1,306 @@
+# SPDX-FileCopyrightText: 2025-2026 Espressif Systems (Shanghai) CO LTD
+# SPDX-License-Identifier: Apache-2.0
+# ---------------------------------------------------------------------------
+# esp-pqc CI pipeline
+#
+# Stages:
+#   build          — compile coverage on ESP-IDF v6.0 / v6.1 / master: test_apps Unity (both CI configs) + kem/signature on c3/c6/p4, pqc_boot_verify on c3/c5/c6, compile+mbedTLS-check of esp_hybrid_tls.
+#   test           — host-side Python unit tests for the ML-DSA-65 signing tool.
+#   emulator_test  — boot firmware in esp-emu (pinned v0.37.0) and assert on serial output: test_apps Unity suite, kem_basic / signature_basic benchmarks, and pqc_boot_verify Secure Boot.
+#
+# Runtime: esp-emu (standalone emulator, c3/c6/p4) is driven by ci/emu_run.py; every functional/on-target test runs under it.
+# Runner tags: all jobs use the "build" tag (Linux x86_64 docker + ESP-IDF image); esp-emu is pure software so emulator jobs share the build machines.
+# ---------------------------------------------------------------------------
+
+stages:
+  - build
+  - test
+  - emulator_test
+
+variables:
+  # Submodules (liboqs, mbedtls) use ssh:// URLs the runner-helper can't authenticate, so skip them here (strategy "none") and fetch in before_script after rewriting ssh:// -> HTTPS with a token.
+  # Token preference in &setup_env: 1. $PQC_READ_TOKEN (masked read_repository token); 2. $CI_JOB_TOKEN (needs esp-pqc on the target repos' job-token allowlist).
+  GIT_STRATEGY: clone
+  GIT_DEPTH: 1
+  GIT_SUBMODULE_STRATEGY: none
+  # Pinned so results are reproducible. Bump deliberately.
+  ESP_EMU_VERSION: "0.37.0"
+  # Default ESP-IDF image for the test/emulator jobs; build jobs sweep all of .idf_images.
+  IDF_IMAGE: "espressif/idf:release-v6.0"
+
+# Every example builds on v6.0, v6.1 and master ("latest" is built from ESP-IDF master).
+.idf_images: &idf_images
+  - "espressif/idf:release-v6.0"
+  - "espressif/idf:release-v6.1"
+  - "espressif/idf:latest"
+
+# Rewrite the ssh:// submodule URLs to HTTPS with a token, then fetch them.
+# Kept as a hidden job so build jobs can reuse it via !reference and still add
+# their own steps.
+.setup_env:
+  before_script: &setup_env
+    - if [ -n "${PQC_READ_TOKEN}" ]; then CLONE_AUTH="oauth2:${PQC_READ_TOKEN}"; else CLONE_AUTH="gitlab-ci-token:${CI_JOB_TOKEN}"; fi
+    - git config --global url."https://${CLONE_AUTH}@${CI_SERVER_HOST}:${CI_SERVER_PORT}/".insteadOf "ssh://git@${CI_SERVER_HOST}:27227/"
+    - git --version
+    - git submodule update --init --recursive
+
+# Base template for anything that builds firmware: ssh key + submodules
+# (*setup_env), then IDF + Python.
+.idf_base:
+  image: ${IDF_IMAGE}
+  tags:
+    - build
+  before_script:
+    - !reference [.setup_env, before_script]
+    - . ${IDF_PATH}/export.sh
+    - python -m pip install -r ci/requirements.txt
+
+# ===========================================================================
+# BUILD STAGE
+# ===========================================================================
+
+# Compile-coverage sweep for the RISC-V emulator targets in one idf-build-apps pass, gated by ci/build_manifest.yml (unsupported combos skipped, not failed).
+# The Unity test_apps build feeds emu_liboqs_test; the kem_basic/signature_basic builds feed emu_kem_basic/emu_signature_basic — all run as-is under esp-emu, so their build dirs are kept.
+# Build dirs are named build_<target>_<config> (idf-build-apps @t/@w placeholders), consumed as-is by the emulator jobs.
+build_apps:
+  extends: .idf_base
+  stage: build
+  parallel:
+    matrix:
+      - IDF_IMAGE: *idf_images
+        IDF_TARGET: [esp32c3, esp32c6, esp32p4]
+  script:
+    - >
+      idf-build-apps build
+      -p test_apps/liboqs_test examples/kem_basic examples/signature_basic
+      --target ${IDF_TARGET}
+      --manifest-file ci/build_manifest.yml
+      --config "sdkconfig.ci.*="
+      --build-dir "build_@t_@w"
+  artifacts:
+    when: always
+    expire_in: 1 week
+    # Every app built here is consumed downstream by an esp-emu job.
+    paths:
+      - "test_apps/liboqs_test/build_*/"
+      - "examples/kem_basic/build_*/"
+      - "examples/signature_basic/build_*/"
+    exclude:
+      - "**/*.o"
+      - "**/*.obj"
+      - "**/CMakeFiles/**"
+      - "**/esp-idf/**/*.a"
+
+# pqc_boot_verify has its own bootloader sub-project and runs scripts/pqc_sign.py at build time to append the ML-DSA-65 signature block, so building it end-to-end-tests the signing pipeline (c3/c5/c6, each with its own memory.ld.in + sdkconfig.defaults.<t>). Secure Boot V2 scheme: RSA-3072 on all three.
+# esp-emu covers c3 and c6, so both feed emu_pqc_boot_verify; c5 is compile-only.
+# NOTE: signing keys are NOT committed — generated below before the first CMake configure (rsa3072).
+build_pqc_boot_verify:
+  extends: .idf_base
+  stage: build
+  parallel:
+    matrix:
+      - IDF_IMAGE: *idf_images
+        IDF_TARGET: [esp32c3, esp32c5, esp32c6]
+  script:
+    - python -m pip install -r ci/requirements.txt   # pqcrypto, used by pqc_sign.py at build time
+    - cd examples/pqc_boot_verify
+    # Keys are NOT committed — generate them BEFORE `idf.py set-target`, since configure checks EXISTS on CONFIG_SECURE_BOOT_SIGNING_KEY and otherwise bakes in a permanently-failing gen_secure_boot_signing_key target.
+    # 1. Secure Boot V2 signing key at the exact CONFIG_SECURE_BOOT_SIGNING_KEY path for this target.
+    - |
+      set -e
+      # c3/c5/c6 use RSA-3072 Secure Boot V2 keys.
+      case "${IDF_TARGET}" in
+        esp32c3)  SBK=keys/secure_boot_signing_key_esp32c3.pem;    SCHEME=rsa3072  ;;
+        esp32c5)  SBK=keys/esp32c5_secure_boot_rsa_key.pem;        SCHEME=rsa3072  ;;
+        esp32c6)  SBK=keys/secure_boot_signing_key_esp32c6.pem;    SCHEME=rsa3072  ;;
+        *) echo "no signing-key path for ${IDF_TARGET}"; exit 1 ;;
+      esac
+      mkdir -p "$(dirname "${SBK}")"
+      python -m espsecure generate-signing-key --version 2 --scheme "${SCHEME}" "${SBK}"
+      test -f "${SBK}"
+    # 2. ML-DSA-65 keypair + public-key header baked into the bootloader.
+    - python scripts/pqc_sign.py keygen --keys-dir keys/ --force
+    - python scripts/pqc_sign.py header --pk keys/pqc_ml_dsa_65_public.bin
+      --output bootloader_components/bootloader_support/include/pqc_public_key.h
+    # Now configure (sees the key present -> real passing target) and build.
+    - idf.py set-target ${IDF_TARGET}
+    - idf.py build      # pqc_sign.py sign runs automatically after gen_project_binary
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths:
+      - "examples/pqc_boot_verify/build/flasher_args.json"
+      - "examples/pqc_boot_verify/build/*.bin"
+      - "examples/pqc_boot_verify/build/bootloader/*.bin"
+      - "examples/pqc_boot_verify/build/partition_table/*.bin"
+
+# esp_hybrid_tls needs Wi-Fi + a live TLS server and esp-emu can't emulate a radio, so this is a compile-only job that proves the bundled hybrid-PQC mbedTLS override was pulled in (runtime TLS test deferred to hardware). Needs ESP-IDF v6.x.
+build_esp_hybrid_tls:
+  extends: .idf_base
+  stage: build
+  parallel:
+    matrix:
+      - IDF_IMAGE: *idf_images
+        IDF_TARGET: [esp32c5]
+  script:
+    - cd examples/esp_hybrid_tls
+    # Tee configure/build output so we can assert on the CMake STATUS line printed when the bundled hybrid-PQC submodule is selected (CONFIG_MBEDTLS_USE_BUNDLED_PQC=y, the default).
+    - idf.py set-target ${IDF_TARGET} 2>&1 | tee build_config.log
+    - idf.py build 2>&1 | tee -a build_config.log
+    # Gate 1: the bundled hybrid-PQC mbedTLS override was actually built.
+    - 'grep -q "mbedtls: building BUNDLED hybrid-PQC submodule" build_config.log || { echo "ERROR: bundled hybrid-PQC mbedTLS was NOT pulled in"; exit 1; }'
+    # Gate 2: the Kconfig switch that selects it is on in the resolved config.
+    - 'grep -q "^CONFIG_MBEDTLS_USE_BUNDLED_PQC=y" sdkconfig || { echo "ERROR: CONFIG_MBEDTLS_USE_BUNDLED_PQC not enabled"; exit 1; }'
+    - 'echo "OK: bundled hybrid-PQC mbedTLS confirmed pulled in"'
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths:
+      - "examples/esp_hybrid_tls/build/*.bin"
+      - "examples/esp_hybrid_tls/build_config.log"
+
+# ===========================================================================
+# TEST STAGE  (host-side Python — no device/emulator)
+# ===========================================================================
+
+# Unit tests for the ML-DSA-65 Secure Boot signing tool: signature-block build/parse + CRC, image slicing, C-header generation, and keygen/selftest/verify round trips via the pqcrypto backend.
+test_pqc_sign:
+  stage: test
+  image: ${IDF_IMAGE}
+  tags:
+    - build
+  needs: []          # independent of the build stage; can start immediately
+  # Only needs pqc_sign.py (main repo) — no submodules, no ssh key (global
+  # GIT_SUBMODULE_STRATEGY=none already skips them).
+  before_script:
+    - python -m pip install -r ci/requirements.txt
+  script:
+    - cd ci
+    - python -m unittest discover -s tests -p "test_*.py" -v
+
+# ===========================================================================
+# EMULATOR STAGE  (esp-emu, pinned v0.37.0)
+# ===========================================================================
+
+.emu_base:
+  stage: emulator_test
+  image: ${IDF_IMAGE}
+  # esp-emu is pure software, so these run on the build-stage docker runners (no dedicated emulator_test tag).
+  tags:
+    - build
+  # Uses build artifacts + ci/ scripts, not submodule source, so no submodules / ssh key needed.
+  retry:
+    max: 2
+    when:
+      - script_failure
+      - unknown_failure
+      - stuck_or_timeout_failure
+  before_script:
+    - python -m pip install "esptool>=4.7"
+    # Install the pinned esp-emu with the upstream installer, then put it on PATH.
+    - curl -fsSL https://raw.githubusercontent.com/espressif/esp-emulator/main/install.sh | sh -s -- --version "${ESP_EMU_VERSION}"
+    - export PATH="$HOME/.local/bin:$PATH"
+    - esp-emu --version
+
+# esp-liboqs Unity suite (KEM + SIG + RNG + heap): CI builds set CONFIG_LIBOQS_TEST_RUN_ALL_ON_BOOT=y so every case runs on boot; PASS on the "... DONE" marker, FAIL on ":FAIL" or a non-zero failure count. Runs both build configs (heap default + stack_only) on every esp-emu target.
+emu_liboqs_test:
+  extends: .emu_base
+  needs:
+    - job: build_apps
+      parallel:
+        matrix:
+          - IDF_IMAGE: "espressif/idf:release-v6.0"
+            IDF_TARGET: [esp32c3, esp32c6, esp32p4]
+  parallel:
+    matrix:
+      - IDF_TARGET: [esp32c3, esp32c6, esp32p4]
+        CI_CONFIG: [default, stack_only]
+  script:
+    - >
+      python ci/emu_run.py
+      --build-dir test_apps/liboqs_test/build_${IDF_TARGET}_${CI_CONFIG}
+      --chip ${IDF_TARGET}
+      --expect "esp-liboqs Unity test suite: DONE"
+      --fail ":FAIL"
+      --fail "[1-9][0-9]* Failures"
+      --timeout 600
+
+# ML-KEM-768 keygen + encaps + decaps benchmark under esp-emu, on every supported target (c3/c6/p4). Consumes the kem_basic build from build_apps; PASS on the two example completion markers.
+emu_kem_basic:
+  extends: .emu_base
+  needs:
+    - job: build_apps
+      parallel:
+        matrix:
+          - IDF_IMAGE: "espressif/idf:release-v6.0"
+            IDF_TARGET: [esp32c3, esp32c6, esp32p4]
+  parallel:
+    matrix:
+      - IDF_TARGET: [esp32c3, esp32c6, esp32p4]
+  script:
+    - >
+      python ci/emu_run.py
+      --build-dir examples/kem_basic/build_${IDF_TARGET}_default
+      --chip ${IDF_TARGET}
+      --expect "iterations completed successfully"
+      --expect "Example complete!"
+      --timeout 600
+
+# ML-DSA-65 keygen + sign + verify benchmark under esp-emu, on every supported target (c3/c6/p4). Consumes the signature_basic build from build_apps; PASS once the VERIFY perf-stats line is emitted.
+emu_signature_basic:
+  extends: .emu_base
+  needs:
+    - job: build_apps
+      parallel:
+        matrix:
+          - IDF_IMAGE: "espressif/idf:release-v6.0"
+            IDF_TARGET: [esp32c3, esp32c6, esp32p4]
+  parallel:
+    matrix:
+      - IDF_TARGET: [esp32c3, esp32c6, esp32p4]
+  script:
+    - >
+      python ci/emu_run.py
+      --build-dir examples/signature_basic/build_${IDF_TARGET}_default
+      --chip ${IDF_TARGET}
+      --expect "=== VERIFY Performance Statistics"
+      --timeout 600
+
+# Hybrid PQC Secure Boot: boot the bootloader in the emulator and confirm ML-DSA-65 image verification reaches "PQC verification successful" — a real gate (not allow_failure). esp-emu covers c3 and c6 of the c3/c5/c6 build set; c5 is compile-only.
+# One concrete job per emulated target so each pulls exactly its own target's build artifact (parallel:matrix can't map 1:1 onto a needs:matrix, and all builds share examples/pqc_boot_verify/build).
+.emu_pqc_boot_verify_base:
+  extends: .emu_base
+  script:
+    - >
+      python ci/emu_run.py
+      --build-dir examples/pqc_boot_verify/build
+      --chip ${IDF_TARGET}
+      --expect "PQC verification successful"
+      --timeout 300
+
+emu_pqc_boot_verify:
+  extends: .emu_pqc_boot_verify_base
+  # Pull only the esp32c3 build from the build_pqc_boot_verify matrix.
+  needs:
+    - job: build_pqc_boot_verify
+      parallel:
+        matrix:
+          - IDF_IMAGE: "espressif/idf:release-v6.1"
+            IDF_TARGET: esp32c3
+  variables:
+    IDF_TARGET: esp32c3
+
+emu_pqc_boot_verify_c6:
+  extends: .emu_pqc_boot_verify_base
+  # esp-emu's C6 model may not fully emulate the RSA/SHA secure-boot path yet, so
+  # keep this non-blocking for now (unlike the c3 gate).
+  allow_failure: true
+  # Pull only the esp32c6 build from the build_pqc_boot_verify matrix.
+  needs:
+    - job: build_pqc_boot_verify
+      parallel:
+        matrix:
+          - IDF_IMAGE: "espressif/idf:release-v6.1"
+            IDF_TARGET: esp32c6
+  variables:
+    IDF_TARGET: esp32c6

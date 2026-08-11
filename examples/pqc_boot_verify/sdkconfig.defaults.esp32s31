@@ -1,0 +1,5 @@
+# --- RSA Secure Boot Signing Scheme for ESP32-S31 (ECC V2 not supported) ---
+CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME=y
+
+# --- Signing key path ---
+CONFIG_SECURE_BOOT_SIGNING_KEY="keys/secure_boot_signing_key_esp32s31.pem"

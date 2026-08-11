@@ -1,0 +1,9 @@
+# esp-liboqs Unity test app — build/test rules.
+test_apps/liboqs_test:
+  enable:
+    - if: IDF_TARGET in ["esp32", "esp32s3", "esp32c3", "esp32c5", "esp32c6", "esp32p4"]
+      reason: representative Xtensa + RISC-V targets for liboqs (incl. esp32s31 via --preview locally)
+  disable_test:
+    - if: IDF_TARGET not in ["esp32", "esp32c3"]
+      temporary: true
+      reason: hardware runners only wired for these two; others are build-only

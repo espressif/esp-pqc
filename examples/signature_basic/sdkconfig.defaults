@@ -1,0 +1,32 @@
+# Disable DS peripheral — mbedtls/rsa.h missing in tf-psa-crypto mbedTLS
+CONFIG_ESP_TLS_USE_DS_PERIPHERAL=n
+CONFIG_MBEDTLS_HARDWARE_RSA_DS_PERIPHERAL=n
+
+# liboqs Configuration
+CONFIG_LIBOQS_ENABLED=y
+CONFIG_LIBOQS_ENABLE_SIG_ML_DSA=y
+CONFIG_LIBOQS_ENABLE_SIG_FALCON=n
+CONFIG_LIBOQS_ENABLE_SIG_SPHINCS=n
+CONFIG_LIBOQS_AUTO_INIT_RNG=y
+CONFIG_LIBOQS_USE_ESP_RANDOM=y
+# This example benchmarks signatures only; skip ML-KEM to shrink build and init.
+CONFIG_LIBOQS_ENABLE_KEM_ML_KEM=n
+# Minimal common: only ML-DSA uses fips202_kyber; exclude common SHA3/fips202 to save size
+CONFIG_LIBOQS_MINIMAL_COMMON=y
+
+# Compiler optimizations
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+# FreeRTOS Configuration
+CONFIG_FREERTOS_HZ=1000
+
+# Task watchdog timeout, raised from the 5 s default.
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
+
+# Logging
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y
+
+# Flash and partition configuration
+# Signature algorithms require more flash space
+CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
+CONFIG_PARTITION_TABLE_OFFSET=0x14000

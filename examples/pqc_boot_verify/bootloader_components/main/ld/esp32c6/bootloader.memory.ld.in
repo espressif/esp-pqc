@@ -1,0 +1,110 @@
+/*
+ * SPDX-FileCopyrightText: 2021-2025 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include "sdkconfig.h"
+
+/** Simplified memory map for the bootloader.
+ *  Make sure the bootloader can load into main memory without overwriting itself.
+ *
+ *  ESP32-C6 ROM static data usage is as follows:
+ *  - 0x4086ad08 - 0x4087c610: Shared buffers, used in UART/USB/SPI download mode only
+ *  - 0x4087c610 - 0x4087e610: PRO CPU stack, can be reclaimed as heap after RTOS startup
+ *  - 0x4087e610 - 0x40880000: ROM .bss and .data (not easily reclaimable)
+ *
+ *  The 2nd stage bootloader can take space up to the end of ROM shared
+ *  buffers area (0x4087c610).
+ */
+
+/* We consider 0x4087c610 to be the last usable address for 2nd stage bootloader stack overhead, dram_seg,
+ * and work out iram_seg and iram_loader_seg addresses from there, backwards.
+ */
+
+/* These lengths can be adjusted, if necessary: */
+bootloader_usable_dram_end = 0x4087c610;
+bootloader_stack_overhead = 0x2000; /* For safety margin between bootloader data section and startup stacks */
+/* PQC (ML-DSA-65) verification adds about 8.0 KB of liboqs code and 1.7 KB of glue
+ * to the loader segment, and about 1.4 KB of rodata to dram_seg. The sizes below are
+ * measured usage rounded up, not guesses. Keep them in step with SRAM_SEG_END in
+ * ld/esp32c6/memory.ld.in and PQC_SRAM_BOUNDARY in pqc_bootloader_verify.c.
+ *   PQC off - stock ESP-IDF layout, nothing extra reserved.
+ *   TLSF    - pool and call stack sit just below the app SRAM ceiling, so dram_seg
+ *             only needs bootloader data plus liboqs rodata.
+ *   Stack   - dram_seg also holds the 80 KB .dram0.pqc_stack section. */
+#if !defined(CONFIG_PQC_SECURE_BOOT_ENABLED)
+bootloader_dram_seg_len = 0x5000;
+bootloader_iram_loader_seg_len = 0x7000;
+#elif defined(CONFIG_PQC_MEM_TLSF)
+bootloader_dram_seg_len = 0x6000;           /* 24 KB, 17.1 KB used */
+bootloader_iram_loader_seg_len = 0x9000;    /* 36 KB, 33.8 KB used */
+#else
+bootloader_dram_seg_len = 0x1C000;          /* 112 KB: 24 KB data + 8 KB s_tlsf_pool + 80 KB PQC stack */
+bootloader_iram_loader_seg_len = 0x9000;    /* 36 KB, 33.8 KB used */
+#endif
+bootloader_iram_seg_len = 0x2D00;
+
+/* Start of the lower region is determined by region size and the end of the higher region */
+bootloader_dram_seg_end = bootloader_usable_dram_end - bootloader_stack_overhead;
+bootloader_dram_seg_start = bootloader_dram_seg_end - bootloader_dram_seg_len;
+bootloader_iram_loader_seg_start = bootloader_dram_seg_start - bootloader_iram_loader_seg_len;
+bootloader_iram_seg_start = bootloader_iram_loader_seg_start - bootloader_iram_seg_len;
+
+MEMORY
+{
+  iram_seg (RWX) :                  org = bootloader_iram_seg_start, len = bootloader_iram_seg_len
+  iram_loader_seg (RWX) :           org = bootloader_iram_loader_seg_start, len = bootloader_iram_loader_seg_len
+  dram_seg (RW) :                   org = bootloader_dram_seg_start, len = bootloader_dram_seg_len
+}
+
+/* The app may use RAM for static allocations up to the start of iram_loader_seg.
+ * If you have changed something above and this assert fails:
+ * 1. Check what the new value of bootloader_iram_loader_seg start is.
+ * 2. Update the value in this assert.
+ * 3. Update SRAM_DRAM_END in components/esp_system/ld/esp32c6/memory.ld.in to the same value.
+ */
+/* iram_seg_start = lowest bootloader SRAM address = app SRAM_SEG_END.
+ * Must match SRAM_SEG_END in this example's app memory.ld.in (ld/<target>). */
+#if !defined(CONFIG_PQC_SECURE_BOOT_ENABLED)
+ASSERT(bootloader_iram_loader_seg_start == 0x4086e610, "bootloader_iram_loader_seg_start inconsistent with SRAM_SEG_END in ld/esp32c6/memory.ld.in (PQC off)");
+#elif defined(CONFIG_PQC_MEM_TLSF)
+ASSERT(bootloader_iram_seg_start == 0x40868910, "bootloader_iram_seg_start inconsistent with SRAM_SEG_END in ld/esp32c6/memory.ld.in (TLSF)");
+#else
+ASSERT(bootloader_iram_seg_start == 0x40852910, "bootloader_iram_seg_start inconsistent with SRAM_SEG_END in ld/esp32c6/memory.ld.in (Stack)");
+#endif
+
+/**
+ *  Appendix: Memory Usage of ROM bootloader
+ *
+ * 0x4086ad08 ------------------> _dram0_0_start
+ *            |               |
+ *            |               |
+ *            |               |   1. Large buffers that are only used in certain boot modes, see shared_buffers.h
+ *            |               |
+ *            |               |
+ * 0x4087c610 ------------------> __stack_sentry
+ *            |               |
+ *            |               |   2. Startup pro cpu stack (freed when IDF app is running)
+ *            |               |
+ * 0x4087e610 ------------------> __stack (pro cpu)
+ *            |               |
+ *            |               |
+ *            |               |   3. Shared memory only used in startup code or nonos/early boot*
+ *            |               |      (can be freed when IDF runs)
+ *            |               |
+ *            |               |
+ * 0x4087f564 ------------------> _dram0_rtos_reserved_start
+ *            |               |
+ *            |               |
+ *            |               |   4. Shared memory used in startup code and when IDF runs
+ *            |               |
+ *            |               |
+ * 0x4087fab0 ------------------> _dram0_rtos_reserved_end
+ *            |               |
+ * 0x4087fce8 ------------------> _data_start_interface
+ *            |               |
+ *            |               |   5. End of DRAM is the 'interface' data with constant addresses (ECO compatible)
+ *            |               |
+ * 0x40880000 ------------------> _data_end_interface
+ */

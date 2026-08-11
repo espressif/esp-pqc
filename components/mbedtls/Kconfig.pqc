@@ -1,0 +1,66 @@
+# SPDX-FileCopyrightText: 2025-2026 Espressif Systems (Shanghai) CO LTD
+# SPDX-License-Identifier: Apache-2.0
+
+menu "mbedTLS"
+
+    config MBEDTLS_USE_BUNDLED_PQC
+        bool "Use bundled hybrid-PQC mbedTLS (instead of default ESP-IDF mbedTLS)"
+        default y
+        help
+            esp-pqc ships an override of ESP-IDF's builtin mbedTLS component
+            (components/mbedtls, wired up via override_path in
+            idf_component.yml). This option chooses which mbedTLS source tree
+            that override builds; components/mbedtls/CMakeLists.txt reads it.
+
+            y - Build the bundled hybrid-PQC mbedTLS submodule shipped in this
+                component (components/mbedtls/mbedtls). This tree adds the TLS 1.3
+                hybrid post-quantum additions (X25519MLKEM768 key exchange and
+                ML-DSA-65 authentication) used by the esp_hybrid_tls example. The
+                actual PQC features are still gated by the "Hybrid PQC TLS" options
+                below (esp-pqc injects the liboqs include path and feature macros
+                onto the mbedTLS targets at configure time).
+
+            n - Build the default ESP-IDF mbedTLS (the overridden $IDF_PATH tree),
+                exactly as if this override component were not present. Use this for
+                projects that do not need the PQC/hybrid-TLS additions.
+
+            Default is y so the bundled PQC mbedTLS is used whenever this component
+            is in the build. Set to n in sdkconfig.defaults for non-PQC projects.
+
+    menu "Hybrid PQC TLS"
+        depends on LIBOQS_ENABLED && MBEDTLS_USE_BUNDLED_PQC
+
+        config MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_GROUP_X25519MLKEM768
+            bool "Enable X25519MLKEM768 hybrid KEM group (TLS 1.3)"
+            depends on LIBOQS_ENABLE_KEM_ML_KEM
+            default y
+            help
+                Enables TLS 1.3 hybrid key exchange using X25519 + ML-KEM-768
+                (IANA group codepoint 0x11EC).
+
+                Also requires TLS 1.3 in mbedTLS
+                (CONFIG_MBEDTLS_SSL_PROTO_TLS1_3), a main task stack of at least
+                16 KB, and a partition table with at least a 2 MB app partition.
+                The server must support X25519MLKEM768 (e.g. OpenSSL 3.5+ with
+                -groups X25519MLKEM768).
+
+                When set, esp-pqc injects the liboqs include path and defines
+                the MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_GROUP_X25519MLKEM768 macro on
+                the mbedTLS library targets at configure time, so ESP-IDF's
+                mbedtls component itself needs no patching. The application MUST
+                list 'mbedtls' before 'esp-pqc' in its REQUIRES so the mbedTLS
+                targets exist when esp-pqc wires them.
+
+        config MBEDTLS_SSL_TLS1_3_SIG_MLDSA65
+            bool "Enable ML-DSA-65 (pure) TLS 1.3 and X.509 verification"
+            depends on LIBOQS_ENABLE_SIG_ML_DSA
+            default y
+            help
+                TLS SignatureScheme 0x0905 and X.509 id-ml-dsa-65 (RFC 9881).
+
+                When set, esp-pqc defines MBEDTLS_SSL_TLS1_3_SIG_MLDSA65 for
+                the mbedTLS build.
+
+    endmenu
+
+endmenu

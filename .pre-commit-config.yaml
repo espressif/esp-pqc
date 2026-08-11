@@ -1,0 +1,18 @@
+# Pre-commit hooks for esp-pqc.
+#
+# License headers are added/checked with Espressif's check-copyright hook,
+# driven by ci/check_copyright_config.yaml (MIT for our sources, Apache-2.0 for
+# the ESP-IDF-derived bootloader code). Upstream submodules, build output and
+# managed_components are excluded.
+#
+# Usage:
+#   pip install pre-commit          # once (or use the ESP-IDF python env)
+#   pre-commit run check-copyright --all-files   # insert/verify headers
+#   pre-commit install              # optional: run automatically on git commit
+repos:
+  - repo: https://github.com/espressif/check-copyright/
+    rev: v1.1.1
+    hooks:
+      - id: check-copyright
+        args: ['--config', 'ci/check_copyright_config.yaml']
+        exclude: '^(components/liboqs/liboqs/|components/mbedtls/mbedtls/|.*/build/|.*/managed_components/)'

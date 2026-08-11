@@ -1,0 +1,121 @@
+# SPDX-FileCopyrightText: 2025-2026 Espressif Systems (Shanghai) CO LTD
+# SPDX-License-Identifier: Apache-2.0
+# The crypto primitives themselves (X25519MLKEM768, ML-DSA-65) are Kconfig
+# symbols owned by the esp-pqc component:
+#   Component config -> Post-Quantum Cryptography (esp-pqc) -> mbedTLS -> Hybrid PQC TLS
+#   Component config -> Post-Quantum Cryptography (esp-pqc) -> liboqs
+# Do not redeclare them here (duplicate Kconfig breaks CMake). The profile
+# choice below selects which CA and port the example uses, and main/CMakeLists.txt
+# checks that the esp-pqc symbols agree with it, failing the build if they do not.
+
+menu "Hybrid PQC TLS Example"
+
+choice EXAMPLE_TLS_PROFILE
+    prompt "TLS crypto profile"
+    default EXAMPLE_TLS_PROFILE_FULL_PQC
+    help
+        Which combination of key exchange and certificate signature the example
+        expects to negotiate. This picks the trust anchor that gets embedded and
+        the TCP port to connect to, and it is cross-checked against the esp-pqc
+        crypto options at build time.
+
+        Each profile pairs with one scripts/run_server.sh mode.
+
+    config EXAMPLE_TLS_PROFILE_CLASSICAL
+        bool "Classical: X25519 + ECDSA-P256 (no PQC)"
+        help
+            Plain TLS 1.3 with no post-quantum algorithms, for footprint and
+            handshake-time comparison against the PQC profiles.
+
+            Embeds certs/ecdsa/test_ca.crt, connects on port 8443.
+            Server: ./scripts/run_server.sh ecdsa
+
+            Requires CONFIG_LIBOQS_ENABLED=n, which also drops both PQC TLS
+            options and keeps liboqs out of the binary so the footprint number
+            is meaningful.
+
+    config EXAMPLE_TLS_PROFILE_HYBRID_KEM
+        bool "Hybrid KEM: X25519MLKEM768 + ECDSA-P256"
+        help
+            Post-quantum key exchange with a classical certificate. This is the
+            profile large deployments ship today: the hybrid KEM removes the
+            harvest-now-decrypt-later risk, while certificates stay classical
+            because the public PKI has not migrated to ML-DSA yet.
+
+            Embeds certs/ecdsa/test_ca.crt, connects on port 8445.
+            Server: ./scripts/run_server.sh hybrid-kem
+
+            Requires X25519MLKEM768=y and MLDSA65=n. Note that with ML-DSA
+            support compiled out, mbedTLS can no longer parse an ML-DSA
+            certificate at all, so the ECDSA trust anchor is mandatory here.
+
+    config EXAMPLE_TLS_PROFILE_FULL_PQC
+        bool "Full PQC: X25519MLKEM768 + ML-DSA-65"
+        help
+            Post-quantum key exchange and a post-quantum certificate chain.
+
+            Embeds certs/mldsa65/test_ca.crt, connects on port 8444.
+            Server: ./scripts/run_server.sh mldsa65
+
+            Requires X25519MLKEM768=y and MLDSA65=y.
+
+endchoice
+
+    config EXAMPLE_HTTP_DOWNLOAD
+        bool "Download a test file over the TLS session and check its SHA-256"
+        default n
+        help
+            After the handshake, request /tls_testfile.bin, store the response
+            body in LittleFS and print its SHA-256, so the run also proves the
+            record layer moved a known payload intact.
+
+            This needs a server that actually serves files. Start the matching
+            profile mode with the download argument:
+              ./scripts/run_server.sh ecdsa download
+              ./scripts/run_server.sh hybrid-kem download
+              ./scripts/run_server.sh mldsa65 download
+
+            When disabled (default), the example still sends the GET and reads
+            the response, but discards the body instead of storing and hashing
+            it. That is the right setting against a plain run_server.sh mode,
+            which uses `s_server -www`: that option ignores the requested path
+            and returns a generated status page whose contents differ per
+            connection, so hashing it is meaningless.
+
+    config EXAMPLE_DOWNLOAD_EXPECTED_SHA256
+        string "Expected SHA-256 of the downloaded file (hex, empty to skip)"
+        depends on EXAMPLE_HTTP_DOWNLOAD
+        default "27783e87963a4efb6829b531c9ba57b44f45797f6770bd637fbf0d807cbdbae0"
+        help
+            Compared against the SHA-256 of the stored file, turning the
+            download into a pass/fail check. The default is the digest of the
+            100 KB files/tls_testfile.bin produced by the generator command in
+            the README, so it holds for any freshly generated copy.
+
+            Leave empty to only log the digest.
+
+    config EXAMPLE_USE_TEST_CERTS
+        bool "Use bundled test certificate (skip hostname/IP verification)"
+        depends on EXAMPLE_TLS_PROFILE_FULL_PQC
+        default n
+        help
+            Use the pre-generated ML-DSA-65 test certificate in certs/test/ and
+            SKIP the server hostname (CN/SAN) check, so the example connects to
+            the test server at ANY IP without regenerating certificates. The
+            server certificate chain is still validated against the bundled test
+            CA (certs/test/ca.crt), only the identity/IP match is skipped.
+
+            This is for quick local testing only and is NOT secure: a valid cert
+            from the test CA is accepted regardless of which host presents it.
+            Do NOT enable it in production.
+
+            When disabled (default), the example enforces full hostname
+            verification against WEB_SERVER and you must regenerate
+            certs/mldsa65/ for your server's IP (see README, "Regenerating the
+            ML-DSA-65 certificates"). Run the matching test server with:
+              ./scripts/run_server.sh test
+
+            Only available in the full PQC profile, because the bundled test
+            certificate is ML-DSA-65 signed.
+
+endmenu

@@ -1,0 +1,9 @@
+# CI variant: upstream stack-only liboqs temporaries (heap-backed paths off).
+# Regression-tests that disabling the override allocators still produces correct
+# results. The Unity tasks are sized large because ML-DSA-65 then keeps ~56 KB
+# on the stack.
+CONFIG_LIBOQS_MLD_HEAP_TEMPORARIES=n
+CONFIG_LIBOQS_MLK_HEAP_TEMPORARIES=n
+CONFIG_LIBOQS_TEST_TASK_STACK_SIZE=110592
+# Auto-run all cases on boot so esp-emu (read-only, no menu input) can drive it.
+CONFIG_LIBOQS_TEST_RUN_ALL_ON_BOOT=y

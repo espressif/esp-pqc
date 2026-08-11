@@ -1,0 +1,7 @@
+[submodule "components/liboqs/liboqs"]
+	path = components/liboqs/liboqs
+	url = ../liboqs.git
+
+[submodule "components/mbedtls/mbedtls"]
+	path = components/mbedtls/mbedtls
+	url = ../mbedtls.git

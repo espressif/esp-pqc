@@ -1,0 +1,3 @@
+# CI config "default" for kem_basic. Empty — inherits sdkconfig.defaults.
+# Present so idf-build-apps produces a deterministic build dir
+# (build_<target>_default) that the emulator job consumes.

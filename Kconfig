@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2025-2026 Espressif Systems (Shanghai) CO LTD
+# SPDX-License-Identifier: Apache-2.0
+#
+# Kconfig entry point for the esp-pqc component. It owns no options of its own:
+# each group is defined next to the code that reads it and pulled in here, so
+# everything still appears under one menu.
+#
+#   components/liboqs/Kconfig     - CONFIG_LIBOQS_*, consumed by CMakeLists.txt
+#                                   and components/liboqs/cmake/*.cmake.
+#   components/mbedtls/Kconfig.pqc - the esp-pqc CONFIG_MBEDTLS_*, consumed by
+#                                   components/mbedtls/CMakeLists.txt (which
+#                                   mbedTLS tree to build) and by the root
+#                                   CMakeLists.txt (the hybrid TLS features it
+#                                   injects onto the mbedTLS targets).
+#
+# The default ESP-IDF mbedTLS options are NOT reached from here.
+# components/mbedtls/Kconfig re-exposes those, and ESP-IDF reads that file
+# directly as the override component's Kconfig.
+
+menu "Post-Quantum Cryptography (esp-pqc)"
+
+    rsource "components/liboqs/Kconfig"
+
+    rsource "components/mbedtls/Kconfig.pqc"
+
+endmenu

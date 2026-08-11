@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2025-2026 Espressif Systems (Shanghai) CO LTD
+# SPDX-License-Identifier: Apache-2.0
+version: "0.1.0"
+description: "Post-Quantum cryptography support for ESP-IDF"
+url: "https://github.com/espressif/esp-pqc"
+repository: "https://github.com/espressif/esp-pqc.git"
+license: "Apache-2.0"
+
+dependencies:
+  idf:
+    version: ">=6.0"
+
+  mbedtls:
+    override_path: components/mbedtls

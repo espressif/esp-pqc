@@ -1,0 +1,5 @@
+# --- RSA Secure Boot Signing Scheme for ESP32-C6 ---
+CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME=y
+
+# --- Signing key path ---
+CONFIG_SECURE_BOOT_SIGNING_KEY="keys/secure_boot_signing_key_esp32c6.pem"

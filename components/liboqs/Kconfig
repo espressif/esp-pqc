@@ -1,0 +1,319 @@
+# SPDX-FileCopyrightText: 2025-2026 Espressif Systems (Shanghai) CO LTD
+# SPDX-License-Identifier: Apache-2.0
+
+menu "liboqs"
+
+    config LIBOQS_ENABLED
+        bool "Enable liboqs library"
+        default y
+        help
+            Enable the liboqs post-quantum cryptography library.
+            Provides Key Encapsulation Mechanisms (KEMs), Digital Signatures,
+            and Stateful Signatures.
+
+            This library implements NIST-standardized algorithms (ML-KEM, ML-DSA)
+            and other quantum-safe cryptographic algorithms.
+
+    menu "Algorithm Selection"
+        depends on LIBOQS_ENABLED
+
+        comment "Key Encapsulation Mechanisms (KEMs)"
+
+        config LIBOQS_ENABLE_KEM_ML_KEM
+            bool "Enable ML-KEM (NIST FIPS 203)"
+            default y
+            help
+                Enable ML-KEM (formerly CRYSTALS-Kyber) - NIST standardized KEM.
+
+                ML-KEM is a lattice-based key encapsulation mechanism standardized
+                by NIST in FIPS 203. Recommended for most applications.
+
+                Variants: ML-KEM-512, ML-KEM-768, ML-KEM-1024
+
+        config LIBOQS_ENABLE_KEM_BIKE
+            bool "Enable BIKE KEM"
+            default n
+            help
+                BIKE (Bit Flipping Key Encapsulation) - Code-based KEM
+
+        config LIBOQS_ENABLE_KEM_FRODOKEM
+            bool "Enable FrodoKEM"
+            default n
+            help
+                FrodoKEM - Conservative lattice-based KEM.
+                Higher memory requirements than ML-KEM.
+
+        config LIBOQS_ENABLE_KEM_NTRUPRIME
+            bool "Enable NTRU Prime"
+            default n
+            help
+                NTRU Prime - Lattice-based KEM family
+
+        config LIBOQS_ENABLE_KEM_CLASSIC_MCELIECE
+            bool "Enable Classic McEliece"
+            default n
+            help
+                Classic McEliece - Code-based KEM with very large keys.
+                Not recommended for ESP32 due to memory constraints.
+
+        config LIBOQS_ENABLE_KEM_HQC
+            bool "Enable HQC"
+            default n
+            help
+                HQC (Hamming Quasi-Cyclic) - Code-based KEM
+
+        config LIBOQS_ENABLE_KEM_KYBER
+            bool "Enable Kyber (NIST Round 3)"
+            default n
+            help
+                Original Kyber from NIST Round 3 (pre-standardization).
+                Consider using ML-KEM instead for the standardized version.
+
+        config LIBOQS_ENABLE_KEM_NTRU
+            bool "Enable NTRU KEM"
+            default n
+            help
+                NTRU - Lattice-based KEM.
+                Adds approximately 52 KB to binary size.
+
+        comment "Digital Signature Schemes"
+
+        config LIBOQS_ENABLE_SIG_ML_DSA
+            bool "Enable ML-DSA (NIST FIPS 204)"
+            default y
+            help
+                Enable ML-DSA (formerly CRYSTALS-Dilithium) - NIST standardized signature.
+
+                ML-DSA is a lattice-based signature scheme standardized by NIST
+                in FIPS 204. Recommended for most applications.
+
+                Variants: ML-DSA-44, ML-DSA-65, ML-DSA-87
+
+        config LIBOQS_ENABLE_SIG_FALCON
+            bool "Enable FALCON"
+            default n
+            help
+                FALCON - Lattice-based signature scheme selected for NIST standardization.
+
+                Compact signatures but requires more stack space for key generation.
+
+        config LIBOQS_ENABLE_SIG_MAYO
+            bool "Enable MAYO"
+            default n
+            help
+                MAYO - Multivariate signature scheme.
+
+                Note: MAYO-5 variant is disabled to reduce size.
+
+        config LIBOQS_ENABLE_SIG_CROSS
+            bool "Enable CROSS"
+            default n
+            help
+                CROSS - Code-based signature scheme.
+
+                Note: Some variants with large stack usage are automatically disabled
+                for ESP32 memory constraints.
+
+        config LIBOQS_ENABLE_SIG_UOV
+            bool "Enable UOV"
+            default n
+            help
+                UOV (Unbalanced Oil and Vinegar) - Multivariate signature scheme
+
+        config LIBOQS_ENABLE_SIG_SNOVA
+            bool "Enable SNOVA"
+            default n
+            help
+                SNOVA - Multivariate signature scheme.
+
+                Note: Large variants are automatically disabled for ESP32.
+
+        config LIBOQS_ENABLE_SIG_SLH_DSA
+            bool "Enable SLH-DSA (FIPS 205)"
+            default n
+            help
+                SLH-DSA - Hash-based signature scheme (FIPS 205).
+
+                Standardized hash-based signatures with multiple variants.
+                Adds approximately 50 KB to binary size due to Keccak/SHA3.
+
+    endmenu
+
+    menu "Memory Configuration"
+        depends on LIBOQS_ENABLED
+
+        config LIBOQS_TASK_STACK_SIZE
+            int "Recommended task stack size for crypto operations (bytes)"
+            default 16384
+            range 4096 131072
+            help
+                Recommended stack size for tasks performing cryptographic operations.
+
+                - ML-KEM-768: ~8-16 KB
+                - ML-DSA-65: ~8-16 KB
+                - FALCON-512: ~32-64 KB
+
+                Set your task stack size via CONFIG_ESP_MAIN_TASK_STACK_SIZE
+                or when creating FreeRTOS tasks.
+
+        config LIBOQS_HEAP_SIZE_WARNING_KB
+            int "Warn if free heap below this threshold (KB)"
+            default 50
+            range 10 512
+            help
+                Log a warning during initialization if free heap falls below
+                this threshold. Helps detect potential out-of-memory conditions.
+
+        choice LIBOQS_MEMORY_PROFILE
+            prompt "Memory profile for algorithm selection"
+            default LIBOQS_MEMORY_BALANCED
+            help
+                Pre-configured memory profiles for different ESP32 variants.
+                This is informational - actual algorithm selection is done above.
+
+            config LIBOQS_MEMORY_MINIMAL
+                bool "Minimal (for ESP32-C2)"
+                help
+                    Recommended for ESP32-C2 (~272 KB SRAM):
+                    - ML-KEM-512
+                    - ML-DSA-44
+
+            config LIBOQS_MEMORY_BALANCED
+                bool "Balanced (ESP32/S2/C3)"
+                help
+                    Recommended for ESP32, ESP32-S2, ESP32-C3 (~320-400 KB SRAM):
+                    - ML-KEM-768
+                    - ML-DSA-65
+                    - FALCON-512
+                    - SLH-DSA-SHA2-128s
+
+            config LIBOQS_MEMORY_FULL
+                bool "Full (ESP32-S3/C6/H2/P4)"
+                help
+                    Recommended for ESP32-S3, C6, H2, P4 (~512 KB SRAM):
+                    - All enabled algorithms
+                    - PSRAM support recommended
+        endchoice
+
+    endmenu
+
+    menu "Advanced Options"
+        depends on LIBOQS_ENABLED
+
+        config LIBOQS_AUTO_INIT_RNG
+            bool "Automatically initialize RNG callback"
+            default y
+            help
+                Automatically call OQS_randombytes_custom_algorithm() at startup
+                using ESP-IDF's hardware RNG (esp_fill_random).
+
+                If disabled, you must manually call esp_liboqs_rng_init() before
+                using any liboqs cryptographic operations.
+
+        config LIBOQS_USE_ESP_RANDOM
+            bool "Use esp_fill_random() for RNG"
+            default y
+            depends on LIBOQS_AUTO_INIT_RNG
+            help
+                Use ESP-IDF's hardware random number generator.
+
+                esp_fill_random() uses the hardware RNG and is cryptographically
+                secure. This is the recommended option for production use.
+
+        config LIBOQS_MLD_HEAP_TEMPORARIES
+            bool "ML-DSA-65: allocate large temporaries on the heap"
+            default y
+            depends on LIBOQS_ENABLE_SIG_ML_DSA
+            help
+                Allocate mldsa-native's large per-call temporaries (expanded
+                matrix, polynomial vectors — ~56 KB peak during sign/verify)
+                with malloc/free instead of on the caller's stack
+                (MLD_CONFIG_CUSTOM_ALLOC_FREE + MLD_CONFIG_REDUCE_RAM).
+
+                With this enabled, ML-DSA-65 sign/verify run in tasks with
+                ~16 KB stacks instead of requiring 80-100 KB. The allocations
+                are transient (freed and zeroized before returning); on
+                allocation failure the operation returns an error instead of
+                overflowing the stack.
+
+                Disable to reproduce the upstream stack-only behavior, e.g.
+                for benchmark comparisons.
+
+        config LIBOQS_MLD_VERIFY_ONLY
+            bool "ML-DSA-65: verify-only build (compile out keygen/sign)"
+            default n
+            depends on LIBOQS_ENABLE_SIG_ML_DSA
+            help
+                Compile out ML-DSA-65 key generation and signing, keeping only
+                signature verification (defines LIBOQS_MLD_VERIFY_ONLY for the
+                liboqs build). Intended for the PQC secure-boot bootloader, which
+                only verifies images. Reduces code size; the keygen/sign entry
+                points return OQS_ERROR. Leave off for general use.
+
+        config LIBOQS_MLD_EXTERNAL_ALLOC
+            bool "ML-DSA-65: consumer-provided allocator for large temporaries"
+            default n
+            depends on LIBOQS_ENABLE_SIG_ML_DSA
+            help
+                Defines LIBOQS_MLD_EXTERNAL_ALLOC for the liboqs build so that
+                config_c.h does NOT define its own malloc-based
+                MLD_CONFIG_CUSTOM_ALLOC_FREE / MLD_CUSTOM_ALLOC / MLD_CUSTOM_FREE.
+                The consumer must then supply those itself (e.g. via a -include
+                header that routes the ML-DSA-65 large temporaries through a
+                custom pool). Used by the PQC secure-boot bootloader to route
+                allocations through its TLSF pool. Leave off for general use
+                (the default malloc/free path).
+
+        config LIBOQS_MLK_HEAP_TEMPORARIES
+            bool "ML-KEM-768: allocate large temporaries on the heap"
+            default y
+            depends on LIBOQS_ENABLE_KEM_ML_KEM
+            help
+                Allocate mlkem-native's large per-call temporaries (expanded
+                matrix, polynomial vectors — ~10-13 KB peak in keygen/encaps/
+                decaps) with malloc/free instead of on the caller's stack.
+
+                With this enabled, ML-KEM-768 runs in small task stacks; the
+                allocations are transient (zeroized before free) and an
+                allocation failure returns an error instead of overflowing
+                the stack. ML-KEM-512/1024 are unaffected (upstream sources).
+
+                Disable to reproduce the upstream stack-only behavior, e.g.
+                for benchmark comparisons.
+
+        config LIBOQS_DEBUG_INSTRUMENTATION
+            bool "Enable benchmark instrumentation (Keccak counters)"
+            default n
+            help
+                Compile in the optional benchmark instrumentation carried by the
+                ML-DSA-65 sources: Keccak-f[1600] permutation counters in
+                fips202_kyber.c (defines LIBOQS_DEBUG_INSTRUMENTATION for the
+                liboqs build). Adds measurable per-operation overhead. Off by
+                default; enable only for performance analysis, not production.
+
+                The per-phase clock_gettime sub-timers that used to live in
+                sign.c were dropped in the liboqs 0.16.0 rebase: upstream
+                restructured verify into a per-row streaming loop, so the phases
+                those timers measured no longer exist as distinct stages.
+
+        config LIBOQS_MINIMAL_COMMON
+            bool "Minimal common layer (exclude SHA3/fips202 from common)"
+            default n
+            help
+                Exclude SHA3, SHA2, and fips202 from the liboqs common layer to
+                reduce binary size. For signature_basic: enable this when you use
+                ONLY ML-DSA (with the Kyber backend). ML-DSA uses its own
+                fips202_kyber; the common SHA3/fips202 are not needed.
+                Do not enable if you also enable FALCON, SLH-DSA, or other
+                signature schemes that need the common hash layer.
+
+        config LIBOQS_VERBOSE_LOGGING
+            bool "Enable verbose logging"
+            default n
+            help
+                Enable detailed logging of liboqs operations.
+                Useful for debugging but increases code size.
+
+    endmenu
+
+endmenu

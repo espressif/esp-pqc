@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2025-2026 Espressif Systems (Shanghai) CO LTD
+# SPDX-License-Identifier: Apache-2.0
+#
+# This is the project-level override of ESP-IDF's builtin `mbedtls` component.
+#
+# esp-pqc's own mbedTLS options (CONFIG_MBEDTLS_USE_BUNDLED_PQC and the hybrid
+# PQC TLS features) are NOT defined here. They sit next to this file in
+# Kconfig.pqc, which the root esp-pqc Kconfig pulls in with rsource so they stay
+# grouped under "Post-Quantum Cryptography (esp-pqc)" -> "mbedTLS". They must
+# stay out of this file: ESP-IDF reads this one automatically as the override
+# component's Kconfig, so anything the root Kconfig also sourced would end up
+# defined twice.
+#
+# This file exists solely so the override component keeps re-exposing the default
+# ESP-IDF mbedTLS options; without the source line below every CONFIG_MBEDTLS_*
+# from $IDF_PATH would disappear from the build.
+
+source "$IDF_PATH/components/mbedtls/Kconfig"
