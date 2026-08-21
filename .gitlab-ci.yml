@@ -119,7 +119,7 @@ build_pqc_boot_verify:
     # 2. ML-DSA-65 keypair + public-key header baked into the bootloader.
     - python scripts/pqc_sign.py keygen --keys-dir keys/ --force
     - python scripts/pqc_sign.py header --pk keys/pqc_ml_dsa_65_public.bin
-      --output bootloader_components/bootloader_support/include/pqc_public_key.h
+      --output bootloader_components/esp_image_verify/include/pqc_public_key.h
     # Now configure (sees the key present -> real passing target) and build.
     - idf.py set-target ${IDF_TARGET}
     - idf.py build      # pqc_sign.py sign runs automatically after gen_project_binary

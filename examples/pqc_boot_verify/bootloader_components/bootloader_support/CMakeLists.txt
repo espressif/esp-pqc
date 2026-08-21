@@ -1,15 +1,16 @@
 # SPDX-FileCopyrightText: 2025-2026 Espressif Systems (Shanghai) CO LTD
 # SPDX-License-Identifier: Apache-2.0
-# Shadow component: overrides IDF's bootloader_support to inject PQC verification.
+# esp-pqc's override of the default ESP-IDF bootloader_support. Carries no local sources: it compiles the default ESP-IDF bootloader_support without the image-verification files, which esp-pqc's esp_image_verify owns instead.
 
 idf_build_get_property(target IDF_TARGET)
 idf_build_get_property(esp_tee_build ESP_TEE_BUILD)
 
-set(IDF_BS "${IDF_PATH}/components/bootloader_support")
-
 if(${target} STREQUAL "linux")
     return()
 endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/pqc_idf_layout.cmake")
+set(IDF_BS "${PQC_IDF_BS}")
 
 if(esp_tee_build)
     set(tee_inc_dirs "${IDF_BS}/include"
@@ -17,25 +18,23 @@ if(esp_tee_build)
                      "${IDF_BS}/bootloader_flash/include")
 
     set(tee_srcs "${IDF_BS}/src/flash_partitions.c"
-                 "${IDF_BS}/src/bootloader_sha.c"
                  "${IDF_BS}/src/bootloader_common_loader.c"
-                 "src/esp_image_format.c"
                  "${IDF_BS}/src/bootloader_utility.c"
                  "${IDF_BS}/src/bootloader_utility_tee.c"
                  "${IDF_BS}/bootloader_flash/src/bootloader_flash.c")
 
     if(CONFIG_SECURE_BOOT_V2_ENABLED)
         if(CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME OR CONFIG_SECURE_SIGNED_APPS_ECDSA_V2_SCHEME)
-            list(APPEND tee_srcs
-                "${IDF_BS}/src/secure_boot_v2/secure_boot_signatures_bootloader.c"
-                "${IDF_BS}/src/secure_boot_v2/secure_boot.c"
-                "${IDF_BS}/src/${IDF_TARGET}/secure_boot_secure_features.c")
+            list(APPEND tee_srcs "${IDF_BS}/src/${IDF_TARGET}/secure_boot_secure_features.c")
         endif()
     endif()
 
+    set(tee_priv_requires esp_image_verify)
+    pqc_require_if_present(tee_priv_requires efuse esp_app_format esptool_py esp_hal_security)
+
     idf_component_register(SRCS ${tee_srcs}
                            INCLUDE_DIRS ${tee_inc_dirs}
-                           PRIV_REQUIRES efuse esp_app_format esptool_py esp_hal_security)
+                           PRIV_REQUIRES ${tee_priv_requires})
     return()
 endif()
 
@@ -62,28 +61,31 @@ if(NOT CONFIG_APP_BUILD_TYPE_PURE_RAM_APP)
         "${IDF_BS}/bootloader_flash/src/bootloader_flash_config_${IDF_TARGET}.c")
 endif()
 
+# esp_image_format.c is omitted here; esp-pqc's esp_image_verify compiles our fork.
 if(CONFIG_APP_BUILD_TYPE_APP_2NDBOOT)
     list(APPEND srcs
         "${IDF_BS}/src/bootloader_utility.c"
-        "${IDF_BS}/src/flash_partitions.c"
-        "src/esp_image_format.c"       # ← local modified version (PQC + ECDSA)
-    )
+        "${IDF_BS}/src/flash_partitions.c")
 endif()
-
-list(APPEND srcs "${IDF_BS}/src/bootloader_sha.c")
 
 if(CONFIG_ESP_ROM_REV0_HAS_NO_ECDSA_INTERFACE)
     list(APPEND srcs "${IDF_BS}/src/${IDF_TARGET}/bootloader_ecdsa.c")
 endif()
 
 if(BOOTLOADER_BUILD OR CONFIG_APP_BUILD_TYPE_RAM)
+    set(priv_include_dirs)
     set(include_dirs "${IDF_BS}/include" "${IDF_BS}/bootloader_flash/include"
                      "${IDF_BS}/private_include")
-    set(priv_requires micro-ecc spi_flash efuse esp_bootloader_format esp_app_format esptool_py)
-    list(APPEND priv_requires esp_hal_wdt esp_hal_gpio esp_hal_uart esp_hal_ana_conv
-         esp_hal_rtc_timer esp_hal_clock esp_hal_security)
-    # bootloader_reset_common.c (bootloader_check_reset) only exists from IDF 6.2, and
-    # only that IDF's bootloader_start.c calls it, so gate it on the file being there.
+    set(priv_requires "")
+    pqc_require_if_present(priv_requires spi_flash efuse esp_bootloader_format esp_app_format esptool_py)
+    # micro-ecc lives in the bootloader subproject, so it is bootloader-build only.
+    if(BOOTLOADER_BUILD)
+        list(APPEND priv_requires esp_image_verify)
+        pqc_require_if_present(priv_requires micro-ecc)
+    endif()
+    pqc_require_if_present(priv_requires esp_hal_wdt esp_hal_gpio esp_hal_uart esp_hal_ana_conv
+                           esp_hal_rtc_timer esp_hal_clock esp_hal_security esp_hal_debug_assist)
+    # Present from IDF v6.1 onwards.
     if(EXISTS "${IDF_BS}/src/bootloader_reset_common.c")
         list(APPEND srcs "${IDF_BS}/src/bootloader_reset_common.c")
     endif()
@@ -101,14 +103,21 @@ if(BOOTLOADER_BUILD OR CONFIG_APP_BUILD_TYPE_RAM)
 else()
     set(include_dirs "${IDF_BS}/include" "${IDF_BS}/bootloader_flash/include")
     set(priv_include_dirs "${IDF_BS}/private_include")
-    set(priv_requires spi_flash mbedtls efuse heap esp_bootloader_format esp_app_format esptool_py)
-    list(APPEND priv_requires esp_hal_wdt esp_hal_gpio esp_hal_uart esp_hal_ana_conv
-         esp_hal_rtc_timer esp_hal_clock esp_hal_security)
+    set(priv_requires "")
+    # heap is required for `heap_memory_layout.h`.
+    pqc_require_if_present(priv_requires spi_flash efuse heap esp_bootloader_format esp_app_format esptool_py)
+    if(NOT PQC_HAS_ESP_IMAGE_VERIFY)
+        pqc_require_if_present(priv_requires mbedtls)
+    endif()
+    pqc_require_if_present(priv_requires esp_hal_wdt esp_hal_gpio esp_hal_uart esp_hal_ana_conv
+                           esp_hal_rtc_timer esp_hal_clock esp_hal_security esp_hal_debug_assist)
 endif()
+
+# Needed by flash_encrypt.c on SOC_KEY_MANAGER_SUPPORTED targets, which is always in srcs.
+pqc_require_if_present(priv_requires esp_security)
 
 if(BOOTLOADER_BUILD)
     list(APPEND srcs "${IDF_BS}/src/bootloader_panic.c")
-    list(APPEND priv_requires esp_security)
 
     if(CONFIG_SECURE_FLASH_ENC_ENABLED)
         list(APPEND srcs
@@ -116,59 +125,19 @@ if(BOOTLOADER_BUILD)
             "${IDF_BS}/src/${IDF_TARGET}/flash_encryption_secure_features.c")
     endif()
 
+    # The secure_boot_v{1,2} sources belong to esp-pqc's esp_image_verify.
     if(CONFIG_SECURE_SIGNED_ON_BOOT)
-        if(CONFIG_SECURE_SIGNED_APPS_ECDSA_SCHEME)
-            list(APPEND srcs
-                "${IDF_BS}/src/secure_boot_v1/secure_boot_signatures_bootloader.c")
-        endif()
-        if(CONFIG_SECURE_BOOT_V1_ENABLED)
-            list(APPEND srcs
-                "${IDF_BS}/src/secure_boot_v1/secure_boot.c"
-                "${IDF_BS}/src/${IDF_TARGET}/secure_boot_secure_features.c")
-        endif()
-        if(CONFIG_SECURE_BOOT_V2_ENABLED)
-            list(APPEND srcs
-                "${IDF_BS}/src/secure_boot_v2/secure_boot_signatures_bootloader.c"
-                "${IDF_BS}/src/secure_boot_v2/secure_boot.c"
-                "${IDF_BS}/src/${IDF_TARGET}/secure_boot_secure_features.c")
+        if(CONFIG_SECURE_BOOT_V1_ENABLED OR CONFIG_SECURE_BOOT_V2_ENABLED)
+            list(APPEND srcs "${IDF_BS}/src/${IDF_TARGET}/secure_boot_secure_features.c")
         endif()
     endif()
-
-    # ── PQC verification sources (only in bootloader build) ─────────────────
-    if(CONFIG_PQC_SECURE_BOOT_ENABLED)
-        list(APPEND srcs
-            "src/pqc_bootloader_verify.c"
-            "src/pqc_stack.S")
-        list(APPEND priv_requires esp-pqc)
-    endif()
-
 else()
     if(CONFIG_SOC_SECURE_BOOT_SUPPORTED)
         list(APPEND srcs "${IDF_BS}/src/${IDF_TARGET}/secure_boot_secure_features.c")
     endif()
-
-    if(CONFIG_SECURE_SIGNED_ON_UPDATE)
-        if(CONFIG_SECURE_SIGNED_APPS_ECDSA_SCHEME)
-            list(APPEND srcs "${IDF_BS}/src/secure_boot_v1/secure_boot_signatures_app.c")
-        endif()
-        if(CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME)
-            list(APPEND srcs
-                "${IDF_BS}/src/secure_boot_v2/secure_boot_signatures_app.c"
-                "${IDF_BS}/src/secure_boot_v2/secure_boot_rsa_signature.c")
-        endif()
-        if(CONFIG_SECURE_SIGNED_APPS_ECDSA_V2_SCHEME)
-            list(APPEND srcs
-                "${IDF_BS}/src/secure_boot_v2/secure_boot_signatures_app.c"
-                "${IDF_BS}/src/secure_boot_v2/secure_boot_ecdsa_signature.c")
-        endif()
-    endif()
 endif()
 
 set(requires soc)
-
-if(CONFIG_PQC_SECURE_BOOT_ENABLED AND BOOTLOADER_BUILD)
-    list(APPEND priv_requires esp-pqc)
-endif()
 
 idf_component_register(
     SRCS            "${srcs}"
@@ -178,35 +147,9 @@ idf_component_register(
     PRIV_REQUIRES   "${priv_requires}"
 )
 
-
-# ── PQC header search path (only needed when PQC is enabled) ────────────────
-if(CONFIG_PQC_SECURE_BOOT_ENABLED AND BOOTLOADER_BUILD)
-    target_include_directories(${COMPONENT_LIB} PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/include")
-
-    idf_component_get_property(liboqs_lib esp-pqc COMPONENT_LIB)
-    target_include_directories(${COMPONENT_LIB} PRIVATE
-        $<TARGET_PROPERTY:${liboqs_lib},INTERFACE_INCLUDE_DIRECTORIES>)
-
-    target_link_options(${COMPONENT_LIB} INTERFACE
-        "LINKER:--undefined=OQS_SIG_ml_dsa_65_new")
-
-    target_sources(${COMPONENT_LIB} PRIVATE
-        "${IDF_PATH}/components/heap/tlsf/tlsf.c")
-    set_source_files_properties("${IDF_PATH}/components/heap/tlsf/tlsf.c"
-        PROPERTIES COMPILE_DEFINITIONS "printf=esp_rom_printf")
-    target_include_directories(${COMPONENT_LIB} PRIVATE
-        "${IDF_PATH}/components/heap/tlsf"
-        "${IDF_PATH}/components/heap/tlsf/include")
-endif()
-
-if(NOT BOOTLOADER_BUILD)
-    if(CONFIG_SECURE_SIGNED_ON_UPDATE)
-        if(CONFIG_SECURE_SIGNED_APPS_ECDSA_SCHEME OR CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME OR
-           CONFIG_SECURE_SIGNED_APPS_ECDSA_V2_SCHEME)
-            target_link_libraries(${COMPONENT_LIB} PRIVATE idf::app_update)
-        endif()
-    endif()
+# Command only exists from IDF v6.2.
+if(COMMAND idf_define_esp_err_codes)
+    idf_define_esp_err_codes(HEADERS "${IDF_BS}/include/esp_image_format.h")
 endif()
 
 if(CONFIG_SECURE_SIGNED_APPS AND
@@ -258,3 +201,6 @@ if(BOOTLOADER_BUILD)
     target_link_libraries(${COMPONENT_LIB} INTERFACE "-u abort")
     target_link_libraries(${COMPONENT_LIB} INTERFACE "-u esp_bootloader_desc")
 endif()
+
+# Linker script placement depends on object file names, which LTO does not preserve.
+idf_component_set_property(${COMPONENT_NAME} NO_LTO 1)

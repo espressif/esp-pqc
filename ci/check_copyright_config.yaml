@@ -38,6 +38,7 @@ liboqs_ports_upstream_derived:
 esp_idf_derived_bootloader:
   include:
     - 'examples/pqc_boot_verify/bootloader_components/bootloader_support/'
+    - 'examples/pqc_boot_verify/bootloader_components/esp_image_verify/'
     - 'examples/pqc_boot_verify/bootloader_components/main/'
   allowed_licenses:
     - Apache-2.0

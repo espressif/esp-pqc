@@ -26,6 +26,11 @@
     *libbootloader_support.a:secure_boot.*(.literal .text .literal.* .text.*) \
     *libbootloader_support.a:secure_boot_secure_features.*(.literal .text .literal.* .text.*) \
     *libbootloader_support.a:secure_boot_signatures_bootloader.*(.literal .text .literal.* .text.*) \
+    /* Same members, for IDF that ships them in esp_image_verify. */ \
+    *libesp_image_verify.a:bootloader_sha*.*(.literal .text .literal.* .text.*) \
+    *libesp_image_verify.a:esp_image_format.*(.literal .text .literal.* .text.*) \
+    *libesp_image_verify.a:secure_boot.*(.literal .text .literal.* .text.*) \
+    *libesp_image_verify.a:secure_boot_signatures_bootloader.*(.literal .text .literal.* .text.*) \
     *libmicro-ecc.a:*.*(.literal .text .literal.* .text.*) \
     *libspi_flash.a:*.*(.literal .text .literal.* .text.*) \
     *libhal.a:mmu_hal.*(.literal .text .literal.* .text.*) \
@@ -42,7 +47,7 @@
     /* the verify code must sit in the loader segment next to esp_image_format.o.   */ \
     /* The `*liboqs.a` glob also covers libliboqs.a, so no separate pattern needed. */ \
     *liboqs.a:*.*(.literal .text .literal.* .text.*) \
-    *libbootloader_support.a:pqc_bootloader_verify.*(.literal .text .literal.* .text.*) \
-    *libbootloader_support.a:pqc_stack.*(.literal .text .literal.* .text.*)
+    *libesp_image_verify.a:pqc_bootloader_verify.*(.literal .text .literal.* .text.*) \
+    *libesp_image_verify.a:pqc_stack.*(.literal .text .literal.* .text.*)
 
 #include "bootloader.sections.common.ld"
