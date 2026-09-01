@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025-2026 Espressif Systems (Shanghai) CO LTD
 # SPDX-License-Identifier: Apache-2.0
-# Shadow IDF's bootloader main component to use our custom linker script.
+# Override the default ESP-IDF bootloader main component to use our custom linker script.
 # bootloader_start.c is referenced from IDF — no local copy needed.
 
 set(IDF_BOOT_MAIN "${IDF_PATH}/components/bootloader/subproject/main")

@@ -59,7 +59,7 @@ The bootloader compares the key in the signature block against a key compiled in
 ```bash
 python scripts/pqc_sign.py header \
     --pk keys/pqc_ml_dsa_65_public.bin \
-    --output bootloader_components/bootloader_support/include/pqc_public_key.h
+    --output bootloader_components/esp_image_verify/include/pqc_public_key.h
 ```
 
 Repeat this step whenever you generate a new key pair.

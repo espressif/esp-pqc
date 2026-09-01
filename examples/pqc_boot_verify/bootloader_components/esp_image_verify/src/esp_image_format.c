@@ -1348,6 +1348,56 @@ verify_signature_and_adjust_image_len(esp_image_metadata_t *data, uint32_t end,
 }
 #endif /* SECURE_BOOT_CHECK_SIGNATURE */
 
+/* IDF 6.0 and 6.1 export bootloader_debug_buffer() from bootloader_utility.c;
+   6.2+ made it file-local to its own esp_image_format.c and dropped the
+   declaration. Defining ours weak covers both: IDF's strong copy wins where it
+   exists, ours is used where it does not. The helper is renamed because 6.0 and
+   6.1 also declare a global bootloader_sha256_hex_to_str in that same header,
+   which a static definition of the same name would clash with. */
+#if CONFIG_BOOTLOADER_LOG_LEVEL >= 4
+static esp_err_t pqc_hex_to_str(char *out_str, const uint8_t *in_array_hex,
+                                size_t len) {
+  if (out_str == NULL || in_array_hex == NULL || len == 0) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  for (size_t i = 0; i < len; i++) {
+    for (int shift = 0; shift < 2; shift++) {
+      uint8_t nibble = (in_array_hex[i] >> (shift ? 0 : 4)) & 0x0F;
+      if (nibble < 10) {
+        out_str[i * 2 + shift] = '0' + nibble;
+      } else {
+        out_str[i * 2 + shift] = 'a' + nibble - 10;
+      }
+    }
+  }
+  return ESP_OK;
+}
+#endif
+
+/* Declared weak ahead of the definition so the attribute is unambiguous, and so
+   the non-static definition has a prototype on the IDF versions whose headers
+   no longer provide one. */
+__attribute__((weak)) void
+bootloader_debug_buffer(const void *buffer, size_t length, const char *label);
+
+void bootloader_debug_buffer(const void *buffer, size_t length,
+                             const char *label) {
+#if CONFIG_BOOTLOADER_LOG_LEVEL >= 4
+  const uint8_t *bytes = (const uint8_t *)buffer;
+  const size_t output_len = MIN(length, 128);
+  char hexbuf[128 * 2 + 1];
+
+  pqc_hex_to_str(hexbuf, bytes, output_len);
+
+  hexbuf[output_len * 2] = '\0';
+  ESP_LOGD(TAG, "%s: %s", label, hexbuf);
+#else
+  (void)buffer;
+  (void)length;
+  (void)label;
+#endif
+}
+
 static esp_err_t
 verify_secure_boot_signature(bootloader_sha256_handle_t sha_handle,
                              esp_image_metadata_t *data, uint8_t *image_digest,

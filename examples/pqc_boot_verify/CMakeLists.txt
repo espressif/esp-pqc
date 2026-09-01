@@ -15,7 +15,7 @@ get_filename_component(ESP_PQC_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 idf_build_set_property(BOOTLOADER_EXTRA_COMPONENT_DIRS "${ESP_PQC_ROOT}" APPEND)
 
 idf_build_set_property(EXTRA_CMAKE_ARGS
-    "-DPQC_BOOTLOADER_SUPPORT_INCLUDE=${PQC_REPO_ROOT}/bootloader_components/bootloader_support/include"
+    "-DPQC_BOOTLOADER_SUPPORT_INCLUDE=${PQC_REPO_ROOT}/bootloader_components/esp_image_verify/include"
     APPEND)
 
 project(pqc_boot_verify)
